@@ -29,7 +29,7 @@ what the mod can do.
 Requires Node 22.18 or later, which runs the TypeScript source directly.
 
 ```bash
-cd apps/mod-scanner
+git clone https://github.com/thieung/mod-scanner && cd mod-scanner
 npm install
 
 # CLI: folder, zip, or GitHub URL / owner/repo
