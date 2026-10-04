@@ -1,0 +1,1 @@
+{ "name": "lint-on-save", "version": "0.2.0", "description": "Runs the linter after edits" }

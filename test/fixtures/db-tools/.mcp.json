@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "db": { "command": "npx", "args": ["-y", "some-db-mcp"] },
+    "pinned": { "command": "npx", "args": ["-y", "@scope/pinned-mcp@1.4.2"] },
+    "remote": { "type": "http", "url": "http://mcp.example.invalid/api" }
+  }
+}

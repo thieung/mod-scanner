@@ -1,0 +1,22 @@
+{
+  "name": "mod-scanner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Static security scanner for Claude Code plugins and mods.",
+  "type": "module",
+  "engines": { "node": ">=22.18" },
+  "bin": { "mod-scanner": "./src/cli.ts" },
+  "scripts": {
+    "start": "node src/server.ts",
+    "scan": "node src/cli.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc -p ."
+  },
+  "dependencies": {
+    "fflate": "^0.8.2",
+    "typescript": "^5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.18.0"
+  }
+}
