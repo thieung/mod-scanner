@@ -136,6 +136,6 @@ SCAN = [
   ('scan.go', 'Scan', 'Quét'),
   ('scan.drop', 'Drop a plugin .zip here', 'Thả file .zip của plugin vào đây'),
   ('scan.drop2', 'or click to choose · up to 10 MB', 'hoặc bấm để chọn · tối đa 10 MB'),
-  ('scan.foot', 'Static analysis only. A clean result means no known malicious pattern was found in this exact version (see its SHA-256), not that the plugin is safe. Mods run with the same access as Claude Code itself; install only from sources you trust.',
-   'Chỉ phân tích tĩnh. Kết quả sạch nghĩa là không tìm thấy mẫu độc hại đã biết trong đúng phiên bản này (xem mã SHA-256), không có nghĩa plugin an toàn. Mod chạy với quyền của chính Claude Code; chỉ cài từ nguồn bạn tin tưởng.'),
+  ('scan.foot', 'Static analysis only. A clean result means no known malicious pattern was found in this exact version (see its SHA-256), not that the plugin is safe. Mods run with the same access as Claude Code itself; install only from sources you trust. Uploaded files are scanned in your browser and never sent to a server.',
+   'Chỉ phân tích tĩnh. Kết quả sạch nghĩa là không tìm thấy mẫu độc hại đã biết trong đúng phiên bản này (xem mã SHA-256), không có nghĩa plugin an toàn. Mod chạy với quyền của chính Claude Code; chỉ cài từ nguồn bạn tin tưởng. File bạn tải lên được quét ngay trong trình duyệt và không bao giờ gửi lên server.'),
 ]

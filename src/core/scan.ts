@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { sha256 as sha256Hash } from '@noble/hashes/sha2'
+import { bytesToHex } from '@noble/hashes/utils'
 import { analyzeModule, type CapabilityHit } from './mod-analyzer.ts'
 import { SECRET_PATH, scanInstructionText, scanShellText } from './text-rules.ts'
 import {
@@ -26,15 +27,19 @@ const WEIGHT: Record<Severity, number> = { critical: 60, high: 25, medium: 8, lo
 const decoder = new TextDecoder('utf-8', { fatal: false })
 const text = (bytes: Uint8Array) => decoder.decode(bytes)
 
+const encoder = new TextEncoder()
+const NUL = new Uint8Array([0])
+
+/** Runs the same in Node, Workers and the browser, so a hash means one thing everywhere. */
 function sha256(tree: FileTree, paths: string[]): string {
-  const hash = createHash('sha256')
+  const hash = sha256Hash.create()
   for (const path of [...paths].sort()) {
-    hash.update(path)
-    hash.update('\0')
+    hash.update(encoder.encode(path))
+    hash.update(NUL)
     hash.update(tree.get(path)!)
-    hash.update('\0')
+    hash.update(NUL)
   }
-  return hash.digest('hex')
+  return bytesToHex(hash.digest())
 }
 
 function parseJson(bytes: Uint8Array | undefined): { value?: unknown; error?: string } {

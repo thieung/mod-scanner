@@ -1,0 +1,17 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "mod-scanner",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  // Builds the in-browser scanner before every `wrangler dev` / `wrangler deploy`.
+  "build": { "command": "npm run build:web" },
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // The Worker adds security headers to every page, so it runs before assets.
+    "run_worker_first": true,
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "none"
+  },
+  "observability": { "enabled": true }
+}

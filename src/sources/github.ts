@@ -30,21 +30,21 @@ export function parseGitHubUrl(input: string): GitHubTarget {
   return { owner, repo, ref, subdir }
 }
 
+export function describeTarget(target: GitHubTarget): string {
+  return `github.com/${target.owner}/${target.repo}${target.ref ? `@${target.ref}` : ''}${target.subdir ? `/${target.subdir}` : ''}`
+}
+
 /**
  * Downloads the repository archive from codeload.github.com. Only that host is
  * ever contacted, so the URL a person types cannot point the server elsewhere.
  */
-export async function fetchGitHub(target: GitHubTarget, fetchImpl: typeof fetch = fetch): Promise<FileTree> {
+export async function downloadGitHubZip(target: GitHubTarget, fetchImpl: typeof fetch = fetch): Promise<Uint8Array<ArrayBuffer>> {
   const ref = target.ref ?? 'HEAD'
-  const url = `https://codeload.github.com/${target.owner}/${target.repo}/zip/${ref === 'HEAD' ? 'HEAD' : `refs/heads/${ref}`}`
-  let response = await fetchImpl(url, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
-  if (response.status === 404 && ref !== 'HEAD') {
-    // a tag or commit rather than a branch
-    response = await fetchImpl(`https://codeload.github.com/${target.owner}/${target.repo}/zip/${ref}`, {
-      redirect: 'error',
-      signal: AbortSignal.timeout(20_000),
-    })
-  }
+  const base = `https://codeload.github.com/${target.owner}/${target.repo}/zip/`
+  const get = (path: string) => fetchImpl(base + path, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
+  let response = await get(ref === 'HEAD' ? 'HEAD' : `refs/heads/${ref}`)
+  // a tag or commit rather than a branch
+  if (response.status === 404 && ref !== 'HEAD') response = await get(ref)
   if (response.status === 404) throw new LimitError('Repository not found or not public')
   if (!response.ok) throw new LimitError(`GitHub returned ${response.status}`)
   const declared = Number(response.headers.get('content-length') ?? 0)
@@ -69,12 +69,20 @@ export async function fetchGitHub(target: GitHubTarget, fetchImpl: typeof fetch 
     bytes.set(chunk, offset)
     offset += chunk.length
   }
+  return bytes
+}
 
-  const tree = readZip(bytes, LIMITS.downloadBytes)
-  if (!target.subdir) return tree
-  const prefix = `${target.subdir.replace(/^\/+|\/+$/g, '')}/`
+/** Keeps the files under `subdir`, re-rooted there. */
+export function selectSubdir(tree: FileTree, subdir: string | undefined): FileTree {
+  if (!subdir) return tree
+  const prefix = `${subdir.replace(/^\/+|\/+$/g, '')}/`
   const sub: FileTree = new Map()
   for (const [path, data] of tree) if (path.startsWith(prefix)) sub.set(path.slice(prefix.length), data)
-  if (sub.size === 0) throw new LimitError(`No files under ${target.subdir}`)
+  if (sub.size === 0) throw new LimitError(`No files under ${subdir}`)
   return sub
+}
+
+export async function fetchGitHub(target: GitHubTarget, fetchImpl: typeof fetch = fetch): Promise<FileTree> {
+  const bytes = await downloadGitHubZip(target, fetchImpl)
+  return selectSubdir(readZip(bytes, LIMITS.downloadBytes), target.subdir)
 }

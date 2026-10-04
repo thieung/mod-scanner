@@ -38,8 +38,8 @@ node src/cli.ts https://github.com/owner/repo/tree/main/plugins/my-mod
 node src/cli.ts plugin.zip --json > report.json
 node src/cli.ts ./plugin --fail-on medium   # exit 1 on medium or worse (default: high)
 
-# Web app: landing page on http://127.0.0.1:8787, scanner on /scan
-npm start                  # PORT, HOST, RATE_LIMIT (scans/min/IP) are configurable
+# Web app (Node): landing page on http://127.0.0.1:8787, scanner on /scan
+npm start                  # builds public/scan-worker.js first                  # PORT, HOST, RATE_LIMIT (scans/min/IP) are configurable
 
 npm test
 npm run typecheck
@@ -51,6 +51,7 @@ npm run typecheck
 | --- | --- | --- |
 | `POST` | `/api/scan/upload?name=x.zip` | raw zip bytes, at most 10 MB |
 | `POST` | `/api/scan/github` | `{ "url": "https://github.com/owner/repo[/tree/ref/path]" }` |
+| `GET` | `/api/github?url=…` | returns the repository zip; the browser scans it |
 | `GET` | `/healthz` | |
 
 Both scan endpoints return a `ScanReport` (`src/core/types.ts`).
@@ -119,6 +120,38 @@ The ten fixtures in `test/fixtures/` (one benign, nine malicious) cover every
 rule family. Their domains are `.invalid`, and the fixtures are inert unless
 someone installs them as plugins.
 
+## Deploy to Cloudflare
+
+The web app runs on Cloudflare Workers, on the free plan:
+
+- **The browser does the scanning.** `public/scan-worker.js`, built from
+  `src/web/scan-worker.ts`, holds the TypeScript compiler and the rules. It is
+  loaded on the first scan, about 1 MB gzipped. Uploaded zips never leave the
+  browser.
+- **The Worker** (`src/worker.ts`, about 2 KB) serves the pages with security
+  headers. It also proxies `GET /api/github?url=…` to codeload.github.com,
+  because browsers cannot download GitHub archives directly (no CORS headers).
+  It never runs or parses plugin code, so it stays well inside the free plan's
+  CPU limit.
+
+**Option 1: connect the repository (recommended).** In the Cloudflare
+dashboard, go to Workers & Pages → Create → Import a repository, and pick
+this repo. Keep the default deploy command (`npx wrangler deploy`).
+`wrangler.jsonc` runs `npm run build:web` first. Every push to `main` then
+deploys.
+
+**Option 2: deploy from a terminal.**
+
+```bash
+npx wrangler login        # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
+npm run deploy            # builds the browser scanner, then wrangler deploy
+```
+
+To run locally on the Workers runtime: `npm run dev:cf`.
+
+To add a custom domain: open the Worker → Settings → Domains & Routes. For
+abuse protection, add a WAF rate-limiting rule on `/api/github`.
+
 ## Languages and theme
 
 Both pages have a light/dark switch and a VI/EN switch. Without a saved choice,
@@ -151,8 +184,10 @@ Findings text comes from the scanner rules and is English only for now.
 ```
 src/core/       analysis: types, mod analyzer (TS AST), text/shell rules, plugin scan + scoring
 src/sources/    zip, directory and GitHub readers with size limits
+src/web/        browser entry: the scan Web Worker
+src/worker.ts   Cloudflare Worker: assets + GitHub proxy
+src/server.ts   Node server: same pages and proxy, plus the /api/scan/* endpoints
 src/cli.ts      CLI
-src/server.ts   HTTP server + API
 public/         landing page (index.html), scanner UI (scan.html, app.js, style.css),
                 theme and language switch (i18n.js)
 scripts/        build-i18n.py + landing_strings.py: the English/Vietnamese string table

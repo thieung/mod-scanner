@@ -123,6 +123,17 @@ const NODE_CAPABILITY: Record<string, CapabilityKind> = {
 
 const GATE_ENV = /^(CI|GITHUB_ACTIONS|GITLAB_CI|BUILDKITE|JENKINS_URL|CIRCLECI|TRAVIS|SANDBOX|DOCKER|CONTAINER)$/
 
+/** Decodes base64 to text without Node's Buffer; undefined when it is not valid base64. */
+function decodeBase64(text: string): string | undefined {
+  try {
+    const binary = atob(text)
+    const bytes = Uint8Array.from(binary, c => c.charCodeAt(0))
+    return new TextDecoder().decode(bytes)
+  } catch {
+    return undefined
+  }
+}
+
 function scriptKind(file: string): ts.ScriptKind {
   if (/\.tsx$/.test(file)) return ts.ScriptKind.TSX
   if (/\.jsx$/.test(file)) return ts.ScriptKind.JSX
@@ -824,8 +835,8 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
         const encoded = name === 'fromCharCode' ? undefined : literalText(node.arguments[0])
         let decoded: string | undefined
         if (encoded) {
-          decoded = Buffer.from(encoded, 'base64').toString('utf8')
-          if (!/^[\x09\x0a\x0d\x20-\x7e]+$/.test(decoded)) decoded = undefined
+          decoded = decodeBase64(encoded)
+          if (decoded !== undefined && !/^[\x09\x0a\x0d\x20-\x7e]+$/.test(decoded)) decoded = undefined
         }
         const host = decoded ? hostOf(decoded) : undefined
         const dangerous = decoded !== undefined && (host !== undefined || scanShellText(decoded, file).length > 0)
@@ -848,10 +859,7 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
     const text = literalText(node)
     if (text !== undefined && !ts.isImportDeclaration(node.parent) && !ts.isExportDeclaration(node.parent)) {
       if (/[A-Za-z0-9+/]{80,}={0,2}/.test(text)) {
-        let decoded = ''
-        try {
-          decoded = Buffer.from(text, 'base64').toString('utf8')
-        } catch {}
+        const decoded = decodeBase64(text) ?? ''
         const readable = decoded.length > 0 && /^[\x09\x0a\x0d\x20-\x7e]+$/.test(decoded)
         if (readable) {
           report(

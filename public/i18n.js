@@ -123,7 +123,7 @@ const VI = {
   "scan.go": "Quét",
   "scan.drop": "Thả file .zip của plugin vào đây",
   "scan.drop2": "hoặc bấm để chọn · tối đa 10 MB",
-  "scan.foot": "Chỉ phân tích tĩnh. Kết quả sạch nghĩa là không tìm thấy mẫu độc hại đã biết trong đúng phiên bản này (xem mã SHA-256), không có nghĩa plugin an toàn. Mod chạy với quyền của chính Claude Code; chỉ cài từ nguồn bạn tin tưởng."
+  "scan.foot": "Chỉ phân tích tĩnh. Kết quả sạch nghĩa là không tìm thấy mẫu độc hại đã biết trong đúng phiên bản này (xem mã SHA-256), không có nghĩa plugin an toàn. Mod chạy với quyền của chính Claude Code; chỉ cài từ nguồn bạn tin tưởng. File bạn tải lên được quét ngay trong trình duyệt và không bao giờ gửi lên server."
 }
 // </vi>
 

@@ -4,19 +4,30 @@
   "private": true,
   "description": "Static security scanner for Claude Code plugins and mods.",
   "type": "module",
-  "engines": { "node": ">=22.18" },
-  "bin": { "mod-scanner": "./src/cli.ts" },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "bin": {
+    "mod-scanner": "./src/cli.ts"
+  },
   "scripts": {
+    "build:web": "esbuild src/web/scan-worker.ts --bundle --minify --format=iife --platform=browser --target=es2022 --outfile=public/scan-worker.js --log-level=warning",
+    "prestart": "npm run build:web",
     "start": "node src/server.ts",
     "scan": "node src/cli.ts",
     "test": "node --test test/*.test.ts",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "dev:cf": "wrangler dev",
+    "deploy": "wrangler deploy"
   },
   "dependencies": {
+    "@noble/hashes": "^1.8.0",
     "fflate": "^0.8.2",
     "typescript": "^5.9.3"
   },
   "devDependencies": {
-    "@types/node": "^22.18.0"
+    "@types/node": "^22.18.0",
+    "esbuild": "^0.28.2",
+    "wrangler": "^4.147.0"
   }
 }

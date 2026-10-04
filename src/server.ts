@@ -2,7 +2,9 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises'
 import { extname, join } from 'node:path'
 import { SCANNER, scanTree } from './core/scan.ts'
-import { fetchGitHub, parseGitHubUrl } from './sources/github.ts'
+import { githubProxy } from './github-proxy.ts'
+import { LANDING_HEADERS, SECURITY_HEADERS } from './http-headers.ts'
+import { describeTarget, fetchGitHub, parseGitHubUrl } from './sources/github.ts'
 import { LIMITS, LimitError } from './sources/limits.ts'
 import { readZip } from './sources/zip.ts'
 
@@ -16,18 +18,12 @@ const STATIC: Record<string, string> = {
   '/app.js': 'app.js',
   '/i18n.js': 'i18n.js',
   '/style.css': 'style.css',
+  '/scan-worker.js': 'scan-worker.js',
 }
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
-}
-
-const SECURITY_HEADERS = {
-  'content-security-policy':
-    "default-src 'none'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'no-referrer',
 }
 
 /** A fixed window per client address; enough to stop one client hogging the scanner. */
@@ -45,12 +41,6 @@ function limited(req: IncomingMessage): boolean {
   }
   entry.count++
   return entry.count > RATE.max
-}
-
-/** The landing page carries its styles inline and shows no scan data, so it may allow inline styles. */
-const LANDING_HEADERS = {
-  ...SECURITY_HEADERS,
-  'content-security-policy': SECURITY_HEADERS['content-security-policy'].replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"),
 }
 
 function send(
@@ -92,6 +82,17 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/github') {
+    if (limited(req)) {
+      json(res, 429, { error: 'Too many scans from this address; try again in a minute.' })
+      return
+    }
+    const proxied = await githubProxy(url)
+    res.writeHead(proxied.status, { ...Object.fromEntries(proxied.headers), ...SECURITY_HEADERS })
+    res.end(new Uint8Array(await proxied.arrayBuffer()))
+    return
+  }
+
   if (req.method === 'POST' && url.pathname.startsWith('/api/scan/')) {
     if (limited(req)) {
       json(res, 429, { error: 'Too many scans from this address; try again in a minute.' })
@@ -109,8 +110,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
         if (typeof body.url !== 'string') throw new LimitError('Send { "url": "https://github.com/owner/repo" }')
         const target = parseGitHubUrl(body.url)
         const tree = await fetchGitHub(target)
-        const source = `github.com/${target.owner}/${target.repo}${target.ref ? `@${target.ref}` : ''}${target.subdir ? `/${target.subdir}` : ''}`
-        json(res, 200, scanTree(tree, source))
+        json(res, 200, scanTree(tree, describeTarget(target)))
         return
       }
     } catch (error) {

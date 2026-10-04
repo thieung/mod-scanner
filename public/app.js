@@ -20,6 +20,7 @@ const STRINGS = {
     severity: { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'info' },
     scanning: name => `Scanning ${name}…`,
     tooBig: 'That file is over 10 MB.',
+    workerFailed: 'The scanner could not start in this browser. Reload the page and try again.',
     serverError: status => `Server returned ${status}`,
     download: 'Download JSON',
     canDo: 'What it can do',
@@ -51,6 +52,7 @@ const STRINGS = {
     severity: { critical: 'nghiêm trọng', high: 'cao', medium: 'trung bình', low: 'thấp', info: 'thông tin' },
     scanning: name => `Đang quét ${name}…`,
     tooBig: 'File này lớn hơn 10 MB.',
+    workerFailed: 'Không khởi động được bộ quét trong trình duyệt này. Hãy tải lại trang rồi thử lại.',
     serverError: status => `Server trả về ${status}`,
     download: 'Tải JSON',
     canDo: 'Plugin làm được gì',
@@ -97,18 +99,47 @@ for (const tab of document.querySelectorAll('[data-tab]')) {
   })
 }
 
-async function run(request, label) {
+// Scanning happens in a Web Worker in this browser. The server only fetches
+// GitHub archives, which browsers cannot download directly.
+let scanWorker = null
+let nextScanId = 1
+
+function scanInBrowser(payload) {
+  if (!scanWorker) scanWorker = new Worker('/scan-worker.js')
+  const worker = scanWorker
+  const id = nextScanId++
+  return new Promise((resolve, reject) => {
+    const done = () => {
+      worker.removeEventListener('message', onMessage)
+      worker.removeEventListener('error', onError)
+    }
+    const onMessage = event => {
+      if (event.data.id !== id) return
+      done()
+      if (event.data.error) reject(new Error(event.data.error))
+      else resolve(event.data.report)
+    }
+    const onError = () => {
+      done()
+      scanWorker = null
+      reject(new Error(T().workerFailed))
+    }
+    worker.addEventListener('message', onMessage)
+    worker.addEventListener('error', onError)
+    worker.postMessage({ id, ...payload }, [payload.bytes])
+  })
+}
+
+async function run(task, label) {
   if (busy) return
   busy = true
   for (const button of document.querySelectorAll('button.primary')) button.disabled = true
   setStatus(T().scanning(label))
   report.hidden = true
   try {
-    const response = await request()
-    const body = await response.json().catch(() => ({ error: T().serverError(response.status) }))
-    if (!response.ok) throw new Error(body.error || T().serverError(response.status))
+    const data = await task()
     setStatus('')
-    render(body)
+    render(data)
     const url = new URL(location.href)
     if (label.startsWith('http') || /^[\w.-]+\/[\w.-]+/.test(label)) url.searchParams.set('url', label)
     else url.searchParams.delete('url')
@@ -125,10 +156,17 @@ $('#github-form').addEventListener('submit', event => {
   event.preventDefault()
   const url = $('#github-url').value.trim()
   if (!url) return
-  run(
-    () => fetch('/api/scan/github', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ url }) }),
-    url,
-  )
+  run(async () => {
+    const response = await fetch(`/api/github?url=${encodeURIComponent(url)}`)
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}))
+      throw new Error(body.error || T().serverError(response.status))
+    }
+    const bytes = await response.arrayBuffer()
+    const source = decodeURIComponent(response.headers.get('x-scan-source') || url)
+    const subdir = decodeURIComponent(response.headers.get('x-scan-subdir') || '') || undefined
+    return scanInBrowser({ bytes, source, subdir, fromGitHub: true })
+  }, url)
 })
 
 function scanFile(file) {
@@ -137,10 +175,7 @@ function scanFile(file) {
     setStatus(T().tooBig, true)
     return
   }
-  run(
-    () => fetch(`/api/scan/upload?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': 'application/zip' }, body: file }),
-    file.name,
-  )
+  run(async () => scanInBrowser({ bytes: await file.arrayBuffer(), source: file.name }), file.name)
 }
 
 const drop = $('#drop')
