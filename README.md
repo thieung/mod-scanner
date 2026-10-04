@@ -24,26 +24,49 @@ what the mod can do.
 | Capability manifest, findings with file:line and snippet, 0–100 score, verdict, SHA-256 per plugin | Data-flow through Node APIs in MCP servers (only listed as capabilities) |
 | Web app (upload or GitHub URL), CLI with CI exit codes, JSON output | |
 
-## Usage
+## Two ways to use it
+
+| | Self-hosted | Web version |
+| --- | --- | --- |
+| Who it is for | Developers, CI pipelines, private or local plugins | Anyone who wants to check a plugin before installing it |
+| Input | Folder, `.zip`, GitHub URL or `owner/repo` | GitHub URL (repo, folder or marketplace repo) or `.zip` upload |
+| Private repos | Yes (scan a local clone) | No, public GitHub repos only |
+| Where code is scanned | Your machine | The visitor's browser |
+| Cost | Free | Free for users; the hosted instance runs on Workers Paid, $5/month (see below) |
+
+## Self-hosted
 
 Requires Node 22.18 or later, which runs the TypeScript source directly.
 
 ```bash
 git clone https://github.com/thieung/mod-scanner && cd mod-scanner
 npm install
+```
 
-# CLI: folder, zip, or GitHub URL / owner/repo
+### Scan from the terminal
+
+```bash
+# folder, zip, or GitHub URL / owner/repo
 node src/cli.ts ./path/to/plugin
 node src/cli.ts https://github.com/owner/repo/tree/main/plugins/my-mod
 node src/cli.ts plugin.zip --json > report.json
-node src/cli.ts ./plugin --fail-on medium   # exit 1 on medium or worse (default: high)
 
-# Web app (Node): landing page on http://127.0.0.1:8787, scanner on /scan
-npm start                  # builds public/scan-worker.js first                  # PORT, HOST, RATE_LIMIT (scans/min/IP) are configurable
-
-npm test
-npm run typecheck
+# CI: exit 1 on medium or worse (default: high)
+node src/cli.ts ./plugin --fail-on medium
 ```
+
+To scan a plugin you already installed, point the CLI at its folder under
+`~/.claude/plugins/`.
+
+### Run your own web app
+
+```bash
+npm start   # builds public/scan-worker.js, then serves http://127.0.0.1:8787 (scanner on /scan)
+```
+
+`PORT`, `HOST` and `RATE_LIMIT` (scans per minute per IP) are configurable. The
+Node server serves the same pages as the web version and also has server-side
+scan endpoints:
 
 ### API
 
@@ -55,6 +78,114 @@ npm run typecheck
 | `GET` | `/healthz` | |
 
 Both scan endpoints return a `ScanReport` (`src/core/types.ts`).
+
+### Develop
+
+```bash
+npm test
+npm run typecheck
+```
+
+## Web version
+
+The web portal (landing page on `/`, scanner on `/scan`) runs on Cloudflare
+Workers. Users install nothing.
+
+### Workflow
+
+1. **Input.** On `/scan`, paste a GitHub link: `owner/repo`, a repository URL,
+   a `/tree/<ref>/<folder>` link to one plugin, or a marketplace repository
+   (one report per plugin). Or drop a plugin `.zip` of at most 10 MB.
+2. **Fetch.** For GitHub, the browser calls `GET /api/github?url=…`. The Worker
+   downloads the archive from `codeload.github.com` (at most 40 MB) and returns
+   the zip. Browsers cannot download it directly because codeload sends no CORS
+   headers.
+3. **Scan.** The browser loads `scan-worker.js` (first scan only, 3.6 MB, about
+   1 MB gzipped) and scans in a Web Worker. Uploaded zips never leave the
+   browser, and the Worker never parses plugin code.
+4. **Report.** Verdict, findings with file and line, capability manifest and
+   SHA-256, downloadable as JSON. The page URL keeps `?url=…`, so a GitHub scan
+   can be shared as a link that re-runs the scan when opened.
+
+There is no lookup by plugin name (`name@marketplace`) yet. Paste the
+marketplace repository or the plugin's folder link instead.
+
+### Cost
+
+The hosted instance runs on the Workers Paid plan ($5/month). Pricing as listed
+on [developers.cloudflare.com](https://developers.cloudflare.com/workers/platform/pricing/)
+on 2026-10-04:
+
+| | Free | Paid (hosted instance) |
+| --- | --- | --- |
+| Price | $0 | $5/month minimum |
+| Requests | 100,000 per day | 10 million/month included, then $0.30 per million |
+| CPU time | 10 ms per request | 30 million ms/month included (up to 5 minutes per request), then $0.02 per million ms |
+| KV | | 10 million reads, 1 million writes, 1 GB included |
+| D1 | | 25 billion rows read, 50 million rows written, 5 GB included |
+
+What one scan uses (estimates from the code, not measured on live traffic):
+
+- **Requests.** `run_worker_first` routes every request through the Worker so it
+  can add security headers, so page files count as Worker requests. A first
+  visit to `/scan` plus one GitHub scan is about 6 requests (page, CSS,
+  `i18n.js`, `app.js`, `scan-worker.js`, `/api/github`); a repeat scan from a
+  cached browser is 1. A `.zip` upload makes no API request. The 10 million
+  included requests cover roughly 1.5 million first-visit scans a month, so the
+  $5 base fee is the whole bill at any realistic traffic.
+- **CPU.** The Worker only adds headers and passes bytes through. Time spent
+  waiting on GitHub does not count as CPU time. Check the real figures in the
+  Worker's observability tab (enabled in `wrangler.jsonc`).
+- **Unlike the free plan, Paid has no hard cap.** Traffic beyond the included
+  amounts is billed instead of refused, so abuse of `/api/github` turns into
+  cost. 10 million extra requests cost $3.
+
+### Feasibility and limits
+
+The web version is feasible as built. The expensive part, parsing TypeScript and
+running the rules, happens in the visitor's browser, which also means uploaded
+zips never reach a server.
+
+The Paid plan also makes scanning inside the Worker possible, because it lifts
+the 10 ms CPU limit. On a laptop, scanning `anthropics/claude-plugins-official`
+(40 plugins) takes about 0.3–0.4 s of CPU and a single small plugin under 50 ms,
+so 30 million CPU ms would cover tens of thousands of large scans a month. The
+blocker is memory: a Worker has 128 MB, while a scan accepts a 40 MB archive
+that unpacks to up to 150 MB. Server-side scanning would need lower limits or
+streaming, and would give up the "uploads stay in your browser" property. It is
+not built.
+
+Known limits:
+
+- Public GitHub repositories only; archives up to 40 MB, uploads up to 10 MB.
+- The first scan downloads about 1 MB, and large repositories use the visitor's
+  CPU, which is slower on phones.
+- `/api/github` is a public proxy. Abuse adds billed requests, and GitHub may
+  throttle the Worker (GitHub does not publish codeload limits). Add a WAF
+  rate-limiting rule on `/api/github` and watch usage in the dashboard.
+- No accounts, scan history or stored reports. The Paid plan's KV and D1
+  quotas would hold stored reports at small scale without raising the bill, but
+  none of this is built.
+
+### Deploy to Cloudflare
+
+**Option 1: connect the repository (recommended).** In the Cloudflare
+dashboard, go to Workers & Pages → Create → Import a repository, and pick
+this repo. Keep the default deploy command (`npx wrangler deploy`).
+`wrangler.jsonc` runs `npm run build:web` first. Every push to `main` then
+deploys.
+
+**Option 2: deploy from a terminal.**
+
+```bash
+npx wrangler login        # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
+npm run deploy            # builds the browser scanner, then wrangler deploy
+```
+
+To run locally on the Workers runtime: `npm run dev:cf`.
+
+To add a custom domain: open the Worker → Settings → Domains & Routes. For
+abuse protection, add a WAF rate-limiting rule on `/api/github`.
 
 ## Verdicts
 
@@ -119,38 +250,6 @@ Tested against `anthropics/claude-plugins-official` (40 plugins) and
 The ten fixtures in `test/fixtures/` (one benign, nine malicious) cover every
 rule family. Their domains are `.invalid`, and the fixtures are inert unless
 someone installs them as plugins.
-
-## Deploy to Cloudflare
-
-The web app runs on Cloudflare Workers, on the free plan:
-
-- **The browser does the scanning.** `public/scan-worker.js`, built from
-  `src/web/scan-worker.ts`, holds the TypeScript compiler and the rules. It is
-  loaded on the first scan, about 1 MB gzipped. Uploaded zips never leave the
-  browser.
-- **The Worker** (`src/worker.ts`, about 2 KB) serves the pages with security
-  headers. It also proxies `GET /api/github?url=…` to codeload.github.com,
-  because browsers cannot download GitHub archives directly (no CORS headers).
-  It never runs or parses plugin code, so it stays well inside the free plan's
-  CPU limit.
-
-**Option 1: connect the repository (recommended).** In the Cloudflare
-dashboard, go to Workers & Pages → Create → Import a repository, and pick
-this repo. Keep the default deploy command (`npx wrangler deploy`).
-`wrangler.jsonc` runs `npm run build:web` first. Every push to `main` then
-deploys.
-
-**Option 2: deploy from a terminal.**
-
-```bash
-npx wrangler login        # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
-npm run deploy            # builds the browser scanner, then wrangler deploy
-```
-
-To run locally on the Workers runtime: `npm run dev:cf`.
-
-To add a custom domain: open the Worker → Settings → Domains & Routes. For
-abuse protection, add a WAF rate-limiting rule on `/api/github`.
 
 ## Languages and theme
 
