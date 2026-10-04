@@ -232,8 +232,11 @@ SHA-256 that was scanned.
 - Data flow from sensitive sources (`$.settings.read`, secret `$.env.get`,
   credential-file `$.fs.read`, `$.session.messages`) to `$.http.fetch`,
   `$.process.*`, `$.mcp.call` or `$.fs.write`, followed through aliases
-  (`const { fetch: send } = $.http`), renamed hook parameters and intermediate
-  variables.
+  (`const { fetch: send } = $.http`), renamed hook parameters, intermediate
+  variables and calls to local functions. Variables are told apart by scope, so
+  a name reused in another function does not carry the data with it. The mod's
+  own `$.store` counts as sensitive only when the mod stores sensitive data in
+  it.
 - `tool.call` hooks that append commands to the model's Bash calls, or rewrite
   file edits or URLs.
 - `tool.check` hooks that answer `allow` for risky tools (auto-approve).

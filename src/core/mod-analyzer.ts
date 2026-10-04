@@ -93,8 +93,9 @@ const PROMPT_EVENTS = new Set([
 ])
 
 /** Sources whose data should never reach the network without the person knowing. */
-const SENSITIVE_SOURCES = new Set(['settings.read', 'session.messages', 'session.turns', 'store.get'])
-const SOURCES = new Set(['fs.read', 'env.get', ...SENSITIVE_SOURCES])
+const SENSITIVE_SOURCES = new Set(['settings.read', 'session.messages', 'session.turns'])
+/** `store.get` is sensitive only when the same module stores something sensitive. */
+const SOURCES = new Set(['fs.read', 'env.get', 'store.get', ...SENSITIVE_SOURCES])
 const SINKS = new Set(['http.fetch', 'process.run', 'process.spawn', 'fs.write', 'mcp.call', 'tool.call'])
 
 const RISKY_TOOLS = /^(Bash|Write|Edit|MultiEdit|NotebookEdit|WebFetch|WebSearch|Task|Agent|mcp__.*|\*)$/
@@ -384,6 +385,150 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
     ts.forEachChild(node, visitCalls)
   }
   visitCalls(sf)
+
+  // --- taint: which values come from a source -----------------------------------
+  // Keyed by symbol from a one-file program, so `name` in one function is not
+  // `name` in another; a name-keyed map let one read taint most of a large file.
+
+  const checker = ts
+    .createProgram({
+      rootNames: [file],
+      options: { noLib: true, noResolve: true, allowJs: true, types: [] },
+      host: {
+        getSourceFile: name => (name === file ? sf : undefined),
+        fileExists: name => name === file,
+        readFile: () => undefined,
+        writeFile: () => {},
+        getDefaultLibFileName: () => 'lib.d.ts',
+        getCurrentDirectory: () => '',
+        getCanonicalFileName: name => name,
+        useCaseSensitiveFileNames: () => true,
+        getNewLine: () => '\n',
+      },
+    })
+    .getTypeChecker()
+
+  /** Property names (`a.name`, `{ name: x }`) are not variables. */
+  const isPropertyName = (id: ts.Identifier) => {
+    const parent = id.parent
+    return (
+      ((ts.isPropertyAccessExpression(parent) ||
+        ts.isPropertyAssignment(parent) ||
+        ts.isMethodDeclaration(parent) ||
+        ts.isPropertyDeclaration(parent) ||
+        ts.isPropertySignature(parent) ||
+        ts.isJsxAttribute(parent)) &&
+        parent.name === id) ||
+      (ts.isBindingElement(parent) && parent.propertyName === id)
+    )
+  }
+
+  const symbolOf = (id: ts.Identifier): ts.Symbol | undefined => {
+    if (ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id) return checker.getShorthandAssignmentValueSymbol(id.parent)
+    return checker.getSymbolAtLocation(id)
+  }
+
+  type Taint = { source: string; sensitive: boolean }
+  const tainted = new Map<ts.Symbol, Taint>()
+  /** The mod's own store only counts as sensitive once the mod puts something sensitive in it. */
+  let storeHoldsSensitive = false
+  let changed = false
+
+  const callApi = (node: ts.CallExpression) => calls.find(c => c.node === node)?.api
+
+  const sourceOf = (node: ts.Node): Taint | undefined => {
+    let found: Taint | undefined
+    const walk = (n: ts.Node) => {
+      if (found?.sensitive) return
+      if (ts.isCallExpression(n)) {
+        const api = callApi(n)
+        if (api && SOURCES.has(api)) {
+          const literal = firstLiteralArg(n)
+          const sensitive =
+            SENSITIVE_SOURCES.has(api) ||
+            (api === 'store.get' && storeHoldsSensitive) ||
+            (api === 'fs.read' && literal !== undefined && SECRET_PATH.test(literal)) ||
+            (api === 'fs.read' && literal === undefined) ||
+            (api === 'env.get' && literal !== undefined && SECRET_ENV.test(literal))
+          const taint = { source: literal ? `$.${api}("${literal}")` : `$.${api}()`, sensitive }
+          if (!found || sensitive) found = taint
+        }
+      }
+      if (ts.isIdentifier(n) && !isPropertyName(n)) {
+        const symbol = symbolOf(n)
+        const taint = symbol && tainted.get(symbol)
+        if (taint && (!found || taint.sensitive)) found = taint
+      }
+      ts.forEachChild(n, walk)
+    }
+    walk(node)
+    return found
+  }
+
+  const mark = (symbol: ts.Symbol | undefined, taint: Taint) => {
+    if (!symbol) return
+    const prior = tainted.get(symbol)
+    if (prior && (prior.sensitive || !taint.sensitive)) return
+    tainted.set(symbol, taint)
+    changed = true
+  }
+
+  const markBinding = (name: ts.BindingName, taint: Taint) => {
+    if (ts.isIdentifier(name)) mark(symbolOf(name), taint)
+    else for (const el of name.elements) if (!ts.isOmittedExpression(el)) markBinding(el.name, taint)
+  }
+
+  /** The local function a call goes to, so taint can follow into its parameters. */
+  const calledFunction = (call: ts.CallExpression): ts.SignatureDeclaration | undefined => {
+    if (!ts.isIdentifier(call.expression)) return undefined
+    const declaration = symbolOf(call.expression)?.valueDeclaration
+    if (!declaration) return undefined
+    if (ts.isFunctionDeclaration(declaration)) return declaration
+    if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+      const init = unwrap(declaration.initializer)
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) return init
+    }
+    return undefined
+  }
+
+  // until nothing changes; each pass can carry taint one step further
+  for (let pass = 0; pass === 0 || (changed && pass < 10); pass++) {
+    changed = false
+    const walk = (node: ts.Node) => {
+      if (ts.isVariableDeclaration(node) && node.initializer) {
+        const taint = sourceOf(node.initializer)
+        if (taint) markBinding(node.name, taint)
+      }
+      if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && ts.isVariableDeclarationList(node.initializer)) {
+        const taint = sourceOf(node.expression)
+        if (taint) for (const decl of node.initializer.declarations) markBinding(decl.name, taint)
+      }
+      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left)) {
+        const op = node.operatorToken.kind
+        if (op === ts.SyntaxKind.EqualsToken || op === ts.SyntaxKind.PlusEqualsToken) {
+          const taint = sourceOf(node.right)
+          if (taint) mark(symbolOf(node.left), taint)
+        }
+      }
+      if (ts.isCallExpression(node)) {
+        if (callApi(node) === 'store.set' && !storeHoldsSensitive && node.arguments.some(arg => sourceOf(arg)?.sensitive)) {
+          storeHoldsSensitive = true
+          changed = true
+        }
+        const fn = calledFunction(node)
+        if (fn) {
+          node.arguments.forEach((arg, i) => {
+            const param = fn.parameters[i]
+            const taint = param && !ts.isSpreadElement(arg) ? sourceOf(arg) : undefined
+            if (taint) markBinding(param.name, taint)
+          })
+        }
+      }
+      ts.forEachChild(node, walk)
+    }
+    walk(sf)
+  }
+
 
   for (const { api, node } of calls) {
     const kind = API_CAPABILITY[api]
@@ -701,67 +846,6 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
 
   // --- data flow: sensitive source → sink ---------------------------------------
 
-  type Taint = { source: string; sensitive: boolean }
-  const tainted = new Map<string, Taint>()
-
-  const callApi = (node: ts.CallExpression) => calls.find(c => c.node === node)?.api
-
-  const sourceOf = (node: ts.Node): Taint | undefined => {
-    let found: Taint | undefined
-    const walk = (n: ts.Node) => {
-      if (found?.sensitive) return
-      if (ts.isCallExpression(n)) {
-        const api = callApi(n)
-        if (api && SOURCES.has(api)) {
-          const literal = firstLiteralArg(n)
-          const sensitive =
-            SENSITIVE_SOURCES.has(api) ||
-            (api === 'fs.read' && literal !== undefined && SECRET_PATH.test(literal)) ||
-            (api === 'fs.read' && literal === undefined) ||
-            (api === 'env.get' && literal !== undefined && SECRET_ENV.test(literal))
-          const taint = { source: literal ? `$.${api}("${literal}")` : `$.${api}()`, sensitive }
-          if (!found || sensitive) found = taint
-        }
-      }
-      if (ts.isIdentifier(n)) {
-        const taint = tainted.get(n.text)
-        if (taint && (!found || taint.sensitive)) found = taint
-      }
-      ts.forEachChild(n, walk)
-    }
-    walk(node)
-    return found
-  }
-
-  for (let pass = 0; pass < 4; pass++) {
-    const walk = (node: ts.Node) => {
-      if (ts.isVariableDeclaration(node) && node.initializer) {
-        const taint = sourceOf(node.initializer)
-        if (taint) {
-          const names: string[] = []
-          const collect = (name: ts.BindingName) => {
-            if (ts.isIdentifier(name)) names.push(name.text)
-            else for (const el of name.elements) if (!ts.isOmittedExpression(el)) collect(el.name)
-          }
-          collect(node.name)
-          for (const name of names) {
-            const prior = tainted.get(name)
-            if (!prior || (!prior.sensitive && taint.sensitive)) tainted.set(name, taint)
-          }
-        }
-      }
-      if (ts.isBinaryExpression(node) && ts.isIdentifier(node.left)) {
-        const op = node.operatorToken.kind
-        if (op === ts.SyntaxKind.EqualsToken || op === ts.SyntaxKind.PlusEqualsToken) {
-          const taint = sourceOf(node.right)
-          if (taint) tainted.set(node.left.text, taint)
-        }
-      }
-      ts.forEachChild(node, walk)
-    }
-    walk(sf)
-  }
-
   let flowFound = false
   for (const { api, node } of calls) {
     if (!SINKS.has(api)) continue
@@ -788,7 +872,7 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
   }
 
   const readsSensitive = calls.some(c => {
-    if (SENSITIVE_SOURCES.has(c.api)) return c.api !== 'store.get'
+    if (SENSITIVE_SOURCES.has(c.api)) return true
     const literal = firstLiteralArg(c.node)
     return (
       (c.api === 'fs.read' && literal !== undefined && SECRET_PATH.test(literal)) ||

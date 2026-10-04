@@ -114,7 +114,7 @@ LANDING = [
   ('scope.out2', '<b>LLM review</b> comparing what the code does with what the description promises', '<b>Đánh giá bằng LLM</b>, so những gì code làm với những gì mô tả hứa hẹn'),
   ('scope.out3', '<b>Version diffs</b> that flag a capability added in a later release', '<b>So sánh phiên bản</b> để cảnh báo năng lực mới xuất hiện ở bản sau'),
   ('scope.out4', '<b>Data-flow for Node APIs</b> in MCP servers; they are listed as capabilities only', '<b>Theo dòng dữ liệu cho Node API</b> trong MCP server; hiện chỉ được liệt kê như năng lực'),
-  ('scope.out5', '<b>Scope-aware tracing</b>; v0.1 follows variables by name, so deliberate obfuscation can slip past', '<b>Truy vết theo scope</b>; v0.1 theo biến bằng tên, nên code cố tình làm rối có thể lọt qua'),
+  ('scope.out5', '<b>Cross-file tracing</b>; data is followed through variables and local functions in one file, not across imported modules or object fields', '<b>Truy vết qua nhiều file</b>; dữ liệu được lần theo qua biến và hàm trong cùng một file, chưa qua module được import hay thuộc tính của object'),
   ('scope.out6', '<b>A pre-install gate</b> inside Claude Code, and a public database of results', '<b>Chặn trước khi cài</b> ngay trong Claude Code, và cơ sở dữ liệu kết quả công khai'),
   ('close.title', 'Found a plugin you’re not sure about?', 'Gặp một plugin bạn chưa chắc?'),
   ('close.body', 'Paste its GitHub URL. The report shows what it can do and where to look, in a few seconds.', 'Dán URL GitHub của nó. Trong vài giây, báo cáo sẽ cho thấy nó làm được gì và cần xem chỗ nào.'),

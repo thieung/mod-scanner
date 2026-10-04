@@ -105,7 +105,7 @@ const VI = {
   "scope.out2": "<b>Đánh giá bằng LLM</b>, so những gì code làm với những gì mô tả hứa hẹn",
   "scope.out3": "<b>So sánh phiên bản</b> để cảnh báo năng lực mới xuất hiện ở bản sau",
   "scope.out4": "<b>Theo dòng dữ liệu cho Node API</b> trong MCP server; hiện chỉ được liệt kê như năng lực",
-  "scope.out5": "<b>Truy vết theo scope</b>; v0.1 theo biến bằng tên, nên code cố tình làm rối có thể lọt qua",
+  "scope.out5": "<b>Truy vết qua nhiều file</b>; dữ liệu được lần theo qua biến và hàm trong cùng một file, chưa qua module được import hay thuộc tính của object",
   "scope.out6": "<b>Chặn trước khi cài</b> ngay trong Claude Code, và cơ sở dữ liệu kết quả công khai",
   "close.title": "Gặp một plugin bạn chưa chắc?",
   "close.body": "Dán URL GitHub của nó. Trong vài giây, báo cáo sẽ cho thấy nó làm được gì và cần xem chỗ nào.",
