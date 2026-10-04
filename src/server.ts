@@ -14,6 +14,7 @@ const STATIC: Record<string, string> = {
   '/': 'index.html',
   '/scan': 'scan.html',
   '/app.js': 'app.js',
+  '/i18n.js': 'i18n.js',
   '/style.css': 'style.css',
 }
 const TYPES: Record<string, string> = {

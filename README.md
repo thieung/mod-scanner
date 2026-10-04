@@ -119,6 +119,22 @@ The ten fixtures in `test/fixtures/` (one benign, nine malicious) cover every
 rule family. Their domains are `.invalid`, and the fixtures are inert unless
 someone installs them as plugins.
 
+## Languages and theme
+
+Both pages have a light/dark switch and a VI/EN switch. Without a saved choice,
+the theme follows the system setting and the language follows the browser.
+Choices are kept in `localStorage`.
+
+English text lives in the HTML. Vietnamese lives in
+`scripts/landing_strings.py`. After changing page copy, update that table and
+run:
+
+```bash
+python3 scripts/build-i18n.py   # marks the strings in the pages and regenerates public/i18n.js
+```
+
+Findings text comes from the scanner rules and is English only for now.
+
 ## Server hardening
 
 - Uploads and GitHub archives are kept in memory and never written to disk.
@@ -137,6 +153,8 @@ src/core/       analysis: types, mod analyzer (TS AST), text/shell rules, plugin
 src/sources/    zip, directory and GitHub readers with size limits
 src/cli.ts      CLI
 src/server.ts   HTTP server + API
-public/         landing page (index.html) and scanner UI (scan.html, app.js, style.css)
+public/         landing page (index.html), scanner UI (scan.html, app.js, style.css),
+                theme and language switch (i18n.js)
+scripts/        build-i18n.py + landing_strings.py: the English/Vietnamese string table
 test/           node:test suite and fixtures
 ```

@@ -1,35 +1,71 @@
 'use strict'
 
-const VERDICT = {
-  'malicious-indicators': ['Malicious indicators', 'Patterns typical of malware were found. Do not install.'],
-  'high-risk': ['High risk', 'It can do things that need a close look before installing.'],
-  review: ['Review recommended', 'Nothing clearly malicious, but some behaviour deserves a look.'],
-  'no-known-issues': ['No known issues found', 'No known malicious pattern in this exact version.'],
+const STRINGS = {
+  en: {
+    verdict: {
+      'malicious-indicators': ['Malicious indicators', 'Patterns typical of malware were found. Do not install.'],
+      'high-risk': ['High risk', 'It can do things that need a close look before installing.'],
+      review: ['Review recommended', 'Nothing clearly malicious, but some behaviour deserves a look.'],
+      'no-known-issues': ['No known issues found', 'No known malicious pattern in this exact version.'],
+    },
+    capability: {
+      'fs.read': 'Reads files', 'fs.write': 'Writes files', network: 'Network access', process: 'Runs commands',
+      'env.read': 'Reads environment variables', 'env.write': 'Changes environment variables',
+      'settings.read': 'Reads Claude Code settings', 'session.read': 'Reads the conversation', 'prompt.modify': 'Changes prompts',
+      'tool.intercept': 'Intercepts tool calls', 'permission.decide': 'Answers permission prompts', ui: 'Draws UI',
+      store: 'Keeps data across sessions', timer: 'Runs on a timer', model: 'Calls the model', agent: 'Starts subagents',
+      'tool.register': 'Adds tools for the model', command: 'Adds slash commands', 'shell.hook': 'Shell hooks on events',
+      'mcp.server': 'MCP servers', instructions: 'Instructions for the model',
+    },
+    severity: { critical: 'critical', high: 'high', medium: 'medium', low: 'low', info: 'info' },
+    scanning: name => `Scanning ${name}…`,
+    tooBig: 'That file is over 10 MB.',
+    serverError: status => `Server returned ${status}`,
+    download: 'Download JSON',
+    canDo: 'What it can do',
+    ships: 'What it ships',
+    findings: n => `Findings (${n})`,
+    noFindings: 'No findings.',
+    noCaps: 'No capabilities detected.',
+    noComponents: 'No components found.',
+    summary: (files, plugins) => `${files} files · ${plugins} plugin${plugins === 1 ? '' : 's'}`,
+    archive: '(archive)',
+    findingsNote: '',
+  },
+  vi: {
+    verdict: {
+      'malicious-indicators': ['Có dấu hiệu độc hại', 'Tìm thấy mẫu điển hình của mã độc. Đừng cài.'],
+      'high-risk': ['Rủi ro cao', 'Plugin làm được những việc cần xem kỹ trước khi cài.'],
+      review: ['Nên xem lại', 'Không có gì rõ ràng độc hại, nhưng vài hành vi đáng xem lại.'],
+      'no-known-issues': ['Chưa thấy vấn đề đã biết', 'Không có mẫu độc hại đã biết trong đúng phiên bản này.'],
+    },
+    capability: {
+      'fs.read': 'Đọc file', 'fs.write': 'Ghi file', network: 'Truy cập mạng', process: 'Chạy lệnh',
+      'env.read': 'Đọc biến môi trường', 'env.write': 'Đổi biến môi trường',
+      'settings.read': 'Đọc settings của Claude Code', 'session.read': 'Đọc hội thoại', 'prompt.modify': 'Sửa prompt',
+      'tool.intercept': 'Chặn lời gọi tool', 'permission.decide': 'Tự trả lời hộp thoại xin quyền', ui: 'Vẽ giao diện',
+      store: 'Lưu dữ liệu qua các phiên', timer: 'Chạy theo hẹn giờ', model: 'Gọi model', agent: 'Khởi tạo subagent',
+      'tool.register': 'Thêm tool cho model', command: 'Thêm slash command', 'shell.hook': 'Shell hook theo sự kiện',
+      'mcp.server': 'MCP server', instructions: 'Chỉ dẫn cho model',
+    },
+    severity: { critical: 'nghiêm trọng', high: 'cao', medium: 'trung bình', low: 'thấp', info: 'thông tin' },
+    scanning: name => `Đang quét ${name}…`,
+    tooBig: 'File này lớn hơn 10 MB.',
+    serverError: status => `Server trả về ${status}`,
+    download: 'Tải JSON',
+    canDo: 'Plugin làm được gì',
+    ships: 'Plugin chứa gì',
+    findings: n => `Phát hiện (${n})`,
+    noFindings: 'Không có phát hiện nào.',
+    noCaps: 'Không phát hiện năng lực nào.',
+    noComponents: 'Không tìm thấy thành phần nào.',
+    summary: (files, plugins) => `${files} file · ${plugins} plugin`,
+    archive: '(file nén)',
+    findingsNote: 'Nội dung từng phát hiện hiện chỉ có tiếng Anh.',
+  },
 }
-
-const CAPABILITY = {
-  'fs.read': ['Reads files', false],
-  'fs.write': ['Writes files', true],
-  network: ['Network access', true],
-  process: ['Runs commands', true],
-  'env.read': ['Reads environment variables', false],
-  'env.write': ['Changes environment variables', true],
-  'settings.read': ['Reads Claude Code settings', true],
-  'session.read': ['Reads the conversation', true],
-  'prompt.modify': ['Changes prompts', true],
-  'tool.intercept': ['Intercepts tool calls', true],
-  'permission.decide': ['Answers permission prompts', true],
-  ui: ['Draws UI', false],
-  store: ['Keeps data across sessions', false],
-  timer: ['Runs on a timer', false],
-  model: ['Calls the model', false],
-  agent: ['Starts subagents', false],
-  'tool.register': ['Adds tools for the model', false],
-  command: ['Adds slash commands', false],
-  'shell.hook': ['Shell hooks on events', true],
-  'mcp.server': ['MCP servers', true],
-  instructions: ['Instructions for the model', false],
-}
+const T = () => STRINGS[window.modScanner?.lang === 'vi' ? 'vi' : 'en']
+const RISKY = new Set(['fs.write', 'network', 'process', 'env.write', 'settings.read', 'session.read', 'prompt.modify', 'tool.intercept', 'permission.decide', 'shell.hook', 'mcp.server'])
 
 const $ = sel => document.querySelector(sel)
 const el = (tag, attrs = {}, ...children) => {
@@ -65,12 +101,12 @@ async function run(request, label) {
   if (busy) return
   busy = true
   for (const button of document.querySelectorAll('button.primary')) button.disabled = true
-  setStatus(`Scanning ${label}…`)
+  setStatus(T().scanning(label))
   report.hidden = true
   try {
     const response = await request()
-    const body = await response.json().catch(() => ({ error: `Server returned ${response.status}` }))
-    if (!response.ok) throw new Error(body.error || `Server returned ${response.status}`)
+    const body = await response.json().catch(() => ({ error: T().serverError(response.status) }))
+    if (!response.ok) throw new Error(body.error || T().serverError(response.status))
     setStatus('')
     render(body)
     const url = new URL(location.href)
@@ -98,7 +134,7 @@ $('#github-form').addEventListener('submit', event => {
 function scanFile(file) {
   if (!file) return
   if (file.size > 10 * 1024 * 1024) {
-    setStatus('That file is over 10 MB.', true)
+    setStatus(T().tooBig, true)
     return
   }
   run(
@@ -124,21 +160,23 @@ function findingItem(f) {
   return el(
     'li',
     { class: 'finding' },
-    el('header', {}, el('span', { class: `pill ${f.severity}` }, f.severity), el('strong', {}, f.title)),
+    el('header', {}, el('span', { class: `pill ${f.severity}` }, T().severity[f.severity] || f.severity), el('strong', {}, f.title)),
     el('p', {}, f.detail),
     f.snippet ? el('pre', {}, f.snippet) : null,
-    el('div', { class: 'where' }, `${f.file || '(archive)'}${f.line ? `:${f.line}` : ''} · ${f.rule}`),
+    el('div', { class: 'where' }, `${f.file || T().archive}${f.line ? `:${f.line}` : ''} · ${f.rule}`),
   )
 }
 
 function renderPlugin(plugin) {
-  const [label] = VERDICT[plugin.verdict]
+  const t = T()
+  const [label] = t.verdict[plugin.verdict]
   const caps = plugin.capabilities.length
     ? el(
         'div',
         { class: 'caps' },
         plugin.capabilities.map(cap => {
-          const [name, risky] = CAPABILITY[cap.kind] || [cap.kind, false]
+          const name = t.capability[cap.kind] || cap.kind
+          const risky = RISKY.has(cap.kind)
           return el(
             'div',
             { class: `cap${risky ? ' risky' : ''}` },
@@ -147,7 +185,7 @@ function renderPlugin(plugin) {
           )
         }),
       )
-    : el('p', { class: 'empty' }, 'No capabilities detected.')
+    : el('p', { class: 'empty' }, t.noCaps)
 
   return el(
     'section',
@@ -155,22 +193,26 @@ function renderPlugin(plugin) {
     el('h3', {}, `${plugin.name}${plugin.version ? ` @ ${plugin.version}` : ''}`, el('span', { class: `pill v-${plugin.verdict}` }, `${label} · ${plugin.score}`)),
     plugin.description ? el('p', { class: 'desc' }, plugin.description) : null,
     el('div', { class: 'meta mono' }, `${plugin.root || '.'} · sha256 ${plugin.sha256}`),
-    el('h4', {}, 'What it can do'),
+    el('h4', {}, t.canDo),
     caps,
-    el('h4', {}, 'What it ships'),
+    el('h4', {}, t.ships),
     plugin.components.length
       ? el('div', { class: 'components' }, plugin.components.map(c => el('span', {}, `${c.kind}: ${c.name}`)))
-      : el('p', { class: 'empty' }, 'No components found.'),
-    el('h4', {}, `Findings (${plugin.findings.length})`),
+      : el('p', { class: 'empty' }, t.noComponents),
+    el('h4', {}, t.findings(plugin.findings.length)),
     plugin.findings.length
       ? el('ul', { class: 'findings' }, plugin.findings.map(findingItem))
-      : el('p', { class: 'empty' }, 'No findings.'),
+      : el('p', { class: 'empty' }, t.noFindings),
   )
 }
 
+let lastReport = null
+
 function render(data) {
-  const [title, summary] = VERDICT[data.verdict]
-  const download = el('button', { class: 'ghost', type: 'button' }, 'Download JSON')
+  lastReport = data
+  const t = T()
+  const [title, summary] = t.verdict[data.verdict]
+  const download = el('button', { class: 'ghost', type: 'button' }, t.download)
   download.addEventListener('click', () => {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
     const link = el('a', { href: URL.createObjectURL(blob), download: `mod-scan-${data.sha256.slice(0, 12)}.json` })
@@ -188,7 +230,8 @@ function render(data) {
         {},
         el('h2', {}, title),
         el('p', {}, summary),
-        el('p', { class: 'mono' }, `${data.source} · ${data.fileCount} files · ${data.plugins.length} plugin${data.plugins.length === 1 ? '' : 's'}`),
+        el('p', { class: 'mono' }, `${data.source} · ${t.summary(data.fileCount, data.plugins.length)}`),
+        t.findingsNote ? el('p', {}, t.findingsNote) : null,
       ),
       el('div', { class: 'actions' }, download),
     ),
@@ -198,6 +241,10 @@ function render(data) {
   report.replaceChildren(...sections.filter(Boolean))
   report.hidden = false
 }
+
+window.modScanner?.onLanguage(() => {
+  if (lastReport) render(lastReport)
+})
 
 const initial = new URL(location.href).searchParams.get('url')
 if (initial) {
