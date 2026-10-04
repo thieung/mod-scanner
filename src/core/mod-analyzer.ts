@@ -339,7 +339,7 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
 
   const firstLiteralArg = (call: ts.CallExpression) => literalText(call.arguments[0])
 
-  const argvOf = (call: ts.CallExpression, api: string): string[] | undefined => {
+  const argvElements = (call: ts.CallExpression, api: string): readonly ts.Expression[] | undefined => {
     let argvNode: ts.Expression | undefined = call.arguments[0]
     if (api === 'process.spawn' && argvNode && ts.isObjectLiteralExpression(argvNode)) {
       const prop = argvNode.properties.find(
@@ -347,11 +347,17 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
       ) as ts.PropertyAssignment | undefined
       argvNode = prop?.initializer
     }
-    if (argvNode && ts.isArrayLiteralExpression(argvNode)) {
-      return argvNode.elements.map(el => literalText(el) ?? '…')
-    }
-    return undefined
+    return argvNode && ts.isArrayLiteralExpression(argvNode) ? argvNode.elements : undefined
   }
+
+  const argvOf = (call: ts.CallExpression, api: string): string[] | undefined =>
+    argvElements(call, api)?.map(el => literalText(el) ?? '…')
+
+  /** The parts of a command line that are filled in at run time rather than written out. */
+  const filledIn = (elements: readonly ts.Expression[]): ts.Expression[] =>
+    elements.flatMap(el =>
+      ts.isStringLiteralLike(el) ? [] : ts.isTemplateExpression(el) ? el.templateSpans.map(span => span.expression) : [el],
+    )
 
   const visitCalls = (node: ts.Node) => {
     if (ts.isCallExpression(node)) {
@@ -579,17 +585,27 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
         )
       } else if (bin && SHELL_BINARIES.test(bin)) {
         const viaShell = /^(sh|bash|zsh|dash|fish|ksh|pwsh|powershell|cmd)$/.test(bin)
+        const shellFindings = scanShellText(argv.join(' '), file, lineOf(node))
+        const parts = filledIn(argvElements(node, api)!)
+        const fed = parts.some(part => sourceOf(part))
+        // a command written out in full, matching no attack pattern, can be read from the source
+        const fixed = parts.length === 0 && shellFindings.length === 0
+        const severity: Severity =
+          bin === 'security' ? 'high' : fixed ? 'low' : viaShell && (fed || shellFindings.length > 0) ? 'high' : 'medium'
         report(
           bin === 'security' ? 'mod.keychain-access' : 'mod.shell-exec',
-          bin === 'security' || viaShell ? 'high' : 'medium',
+          severity,
           bin === 'security' ? 'Reads the macOS keychain' : `Runs \`${bin}\``,
-          viaShell
-            ? 'Starts a shell, which can run anything its arguments say.'
-            : `\`${bin}\` can reach the network or run code; check what it is given.`,
+          fixed
+            ? 'The whole command line is written in the source and matches no known attack pattern; read it to confirm what it does.'
+            : viaShell && severity === 'medium'
+              ? 'Starts a shell with values the mod fills in. None of them come from settings, secrets, files or the conversation, but check what they are.'
+              : viaShell
+                ? 'Starts a shell, which can run anything its arguments say.'
+                : `\`${bin}\` can reach the network or run code; check what it is given.`,
           node,
         )
-        const joined = argv.join(' ')
-        for (const finding of scanShellText(joined, file, lineOf(node))) findings.push(finding)
+        for (const finding of shellFindings) findings.push(finding)
       }
       continue
     }
@@ -895,6 +911,26 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
 
   const usesSink = calls.some(c => SINKS.has(c.api))
 
+  /** `String.fromCharCode(0x2007)`: the text it builds, when every code is a number literal. */
+  const constantCharCodes = (node: ts.CallExpression): string | undefined => {
+    if (node.arguments.length === 0 || !node.arguments.every(ts.isNumericLiteral)) return undefined
+    return String.fromCharCode(...node.arguments.map(arg => Number((arg as ts.NumericLiteral).text)))
+  }
+  // many one-character calls glued together are as hidden as one long call
+  let constantCharCodeCalls = 0
+  const countCharCodes = (node: ts.Node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.name.text === 'fromCharCode' &&
+      constantCharCodes(node) !== undefined
+    ) {
+      constantCharCodeCalls++
+    }
+    ts.forEachChild(node, countCharCodes)
+  }
+  countCharCodes(sf)
+
   const visitMisc = (node: ts.Node) => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression
@@ -915,9 +951,12 @@ export function analyzeModule(file: string, text: string): ModAnalysis {
       if (ts.isIdentifier(callee) && name === 'require') {
         report('mod.require', 'medium', 'Uses `require`', 'Mods have no Node environment; `require` suggests code meant for somewhere else.', node)
       }
-      if (name === 'atob' || (owner === 'String' && name === 'fromCharCode') || (owner === 'Buffer' && name === 'from' && literalText(node.arguments[1]) === 'base64')) {
+      const charCodes = owner === 'String' && name === 'fromCharCode' ? constantCharCodes(node) : undefined
+      // a few constant codes (a figure space, a box-drawing character) hide nothing
+      const harmlessChars = charCodes !== undefined && charCodes.length <= 3 && constantCharCodeCalls < 4
+      if (!harmlessChars && (name === 'atob' || (owner === 'String' && name === 'fromCharCode') || (owner === 'Buffer' && name === 'from' && literalText(node.arguments[1]) === 'base64'))) {
         const encoded = name === 'fromCharCode' ? undefined : literalText(node.arguments[0])
-        let decoded: string | undefined
+        let decoded: string | undefined = charCodes
         if (encoded) {
           decoded = decodeBase64(encoded)
           if (decoded !== undefined && !/^[\x09\x0a\x0d\x20-\x7e]+$/.test(decoded)) decoded = undefined

