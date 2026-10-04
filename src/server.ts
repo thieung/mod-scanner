@@ -12,6 +12,7 @@ const HOST = process.env.HOST ?? '127.0.0.1'
 
 const STATIC: Record<string, string> = {
   '/': 'index.html',
+  '/scan': 'scan.html',
   '/app.js': 'app.js',
   '/style.css': 'style.css',
 }
@@ -45,8 +46,20 @@ function limited(req: IncomingMessage): boolean {
   return entry.count > RATE.max
 }
 
-function send(res: ServerResponse, status: number, body: string | Uint8Array, type = 'application/json; charset=utf-8') {
-  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...SECURITY_HEADERS })
+/** The landing page carries its styles inline and shows no scan data, so it may allow inline styles. */
+const LANDING_HEADERS = {
+  ...SECURITY_HEADERS,
+  'content-security-policy': SECURITY_HEADERS['content-security-policy'].replace("style-src 'self'", "style-src 'self' 'unsafe-inline'"),
+}
+
+function send(
+  res: ServerResponse,
+  status: number,
+  body: string | Uint8Array,
+  type = 'application/json; charset=utf-8',
+  headers: Record<string, string> = SECURITY_HEADERS,
+) {
+  res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', ...headers })
   res.end(body)
 }
 
@@ -70,7 +83,7 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (req.method === 'GET' && url.pathname in STATIC) {
     const file = STATIC[url.pathname]
-    send(res, 200, await readFile(join(PUBLIC, file)), TYPES[extname(file)])
+    send(res, 200, await readFile(join(PUBLIC, file)), TYPES[extname(file)], file === 'index.html' ? LANDING_HEADERS : SECURITY_HEADERS)
     return
   }
   if (req.method === 'GET' && url.pathname === '/healthz') {

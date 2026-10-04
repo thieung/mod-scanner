@@ -38,7 +38,7 @@ node src/cli.ts https://github.com/owner/repo/tree/main/plugins/my-mod
 node src/cli.ts plugin.zip --json > report.json
 node src/cli.ts ./plugin --fail-on medium   # exit 1 on medium or worse (default: high)
 
-# Web app on http://127.0.0.1:8787
+# Web app: landing page on http://127.0.0.1:8787, scanner on /scan
 npm start                  # PORT, HOST, RATE_LIMIT (scans/min/IP) are configurable
 
 npm test
@@ -137,6 +137,6 @@ src/core/       analysis: types, mod analyzer (TS AST), text/shell rules, plugin
 src/sources/    zip, directory and GitHub readers with size limits
 src/cli.ts      CLI
 src/server.ts   HTTP server + API
-public/         web UI
+public/         landing page (index.html) and scanner UI (scan.html, app.js, style.css)
 test/           node:test suite and fixtures
 ```

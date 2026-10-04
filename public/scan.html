@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mod Scanner</title>
+  <meta name="description" content="Static security scan for Claude Code plugins and mods">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header class="top">
+      <a class="brand" href="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.4 9.4 8 11 4.6-1.6 8-6 8-11V5l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+        <span>Mod Scanner</span>
+      </a>
+      <p class="lede">Check a Claude Code plugin before you install it. The scan reads the mods, hooks, MCP servers, skills and agents a plugin ships and lists what they can do and anything that looks malicious. Nothing is executed.</p>
+    </header>
+
+    <section class="card" id="input">
+      <div class="tabs" role="tablist">
+        <button role="tab" aria-selected="true" data-tab="github">GitHub repository</button>
+        <button role="tab" aria-selected="false" data-tab="upload">Upload .zip</button>
+      </div>
+      <form id="github-form" data-panel="github">
+        <label for="github-url">Repository or folder URL</label>
+        <div class="row">
+          <input id="github-url" name="url" type="text" inputmode="url" autocomplete="off" spellcheck="false"
+                 placeholder="https://github.com/owner/repo/tree/main/plugins/my-mod" required>
+          <button type="submit" class="primary">Scan</button>
+        </div>
+      </form>
+      <form id="upload-form" data-panel="upload" hidden>
+        <label class="drop" id="drop">
+          <input id="zip" type="file" accept=".zip,application/zip">
+          <strong>Drop a plugin .zip here</strong>
+          <span>or click to choose · up to 10 MB</span>
+        </label>
+      </form>
+      <p class="status" id="status" role="status" aria-live="polite"></p>
+    </section>
+
+    <section id="report" hidden></section>
+
+    <footer>
+      <p>Static analysis only. A clean result means no known malicious pattern was found in this exact version (see its SHA-256), not that the plugin is safe. Mods run with the same access as Claude Code itself; install only from sources you trust.</p>
+    </footer>
+  </main>
+</body>
+</html>
