@@ -31,6 +31,18 @@ describe('github proxy', () => {
     assert.deepEqual(calls, [])
   })
 
+  test('does not follow a redirect away from codeload', async () => {
+    const calls: string[] = []
+    const redirecting = (async (input: string | URL | Request, init?: RequestInit) => {
+      calls.push(String(input))
+      assert.equal(init?.redirect, 'manual')
+      return new Response(null, { status: 302, headers: { location: 'https://evil.example/x.zip' } })
+    }) as typeof fetch
+    const res = await githubProxy(new URL('https://scan.test/api/github?url=acme/mods'), redirecting)
+    assert.equal(res.status, 400)
+    assert.deepEqual(calls, ['https://codeload.github.com/acme/mods/zip/HEAD'])
+  })
+
   test('reports a missing repository', async () => {
     const res = await githubProxy(new URL('https://scan.test/api/github?url=acme/missing'), fakeFetch([], 404))
     assert.equal(res.status, 400)

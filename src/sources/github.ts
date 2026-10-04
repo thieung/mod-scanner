@@ -41,7 +41,9 @@ export function describeTarget(target: GitHubTarget): string {
 export async function downloadGitHubZip(target: GitHubTarget, fetchImpl: typeof fetch = fetch): Promise<Uint8Array<ArrayBuffer>> {
   const ref = target.ref ?? 'HEAD'
   const base = `https://codeload.github.com/${target.owner}/${target.repo}/zip/`
-  const get = (path: string) => fetchImpl(base + path, { redirect: 'error', signal: AbortSignal.timeout(20_000) })
+  // 'manual' rather than 'error', which the Workers runtime rejects. A redirect then
+  // fails the !response.ok check below, so no other host is ever contacted.
+  const get = (path: string) => fetchImpl(base + path, { redirect: 'manual', signal: AbortSignal.timeout(20_000) })
   let response = await get(ref === 'HEAD' ? 'HEAD' : `refs/heads/${ref}`)
   // a tag or commit rather than a branch
   if (response.status === 404 && ref !== 'HEAD') response = await get(ref)
