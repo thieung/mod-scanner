@@ -2,7 +2,9 @@
 
 const CSP = [
   "default-src 'none'",
-  "script-src 'self'",
+  // Cloudflare Turnstile guards the GitHub proxy on the hosted Worker.
+  "script-src 'self' https://challenges.cloudflare.com",
+  'frame-src https://challenges.cloudflare.com',
   "worker-src 'self'",
   "style-src 'self' https://fonts.googleapis.com",
   'font-src https://fonts.gstatic.com',

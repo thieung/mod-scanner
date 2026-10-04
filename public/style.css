@@ -72,6 +72,7 @@ code, .mono { font-family: var(--mono); font-size: 0.86em; }
 .tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.08); }
 label { display: block; font-weight: 500; margin-bottom: 6px; }
 .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.turnstile:not(:empty) { margin-top: 12px; }
 input[type="text"] {
   flex: 1 1 260px; min-width: 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); font: inherit;

@@ -21,6 +21,7 @@ const STRINGS = {
     scanning: name => `Scanning ${name}…`,
     tooBig: 'That file is over 10 MB.',
     workerFailed: 'The scanner could not start in this browser. Reload the page and try again.',
+    checkFailed: 'The browser check did not finish. Reload the page and try again.',
     serverError: status => `Server returned ${status}`,
     download: 'Download JSON',
     canDo: 'What it can do',
@@ -53,6 +54,7 @@ const STRINGS = {
     scanning: name => `Đang quét ${name}…`,
     tooBig: 'File này lớn hơn 10 MB.',
     workerFailed: 'Không khởi động được bộ quét trong trình duyệt này. Hãy tải lại trang rồi thử lại.',
+    checkFailed: 'Bước kiểm tra trình duyệt chưa hoàn tất. Hãy tải lại trang rồi thử lại.',
     serverError: status => `Server trả về ${status}`,
     download: 'Tải JSON',
     canDo: 'Plugin làm được gì',
@@ -152,12 +154,66 @@ async function run(task, label) {
   }
 }
 
+// Cloudflare Turnstile guards the GitHub proxy when the server hands out a site
+// key (the hosted Worker does; the Node server does not). Tokens are single-use,
+// so every GitHub scan runs the check again. Uploads never need it.
+const turnstile = (() => {
+  let siteKey = null
+  let widget = null
+  let pending = null
+  const settle = (token, error) => {
+    const current = pending
+    pending = null
+    if (!current) return
+    if (token) current.resolve(token)
+    else current.reject(error ?? new Error(T().checkFailed))
+  }
+  const ready = fetch('/api/config')
+    .then(response => (response.ok ? response.json() : {}))
+    .catch(() => ({}))
+    .then(config => {
+      siteKey = config.turnstileSiteKey || null
+      if (!siteKey) return
+      return new Promise((resolve, reject) => {
+        const script = el('script', { src: 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit' })
+        script.onload = resolve
+        script.onerror = () => reject(new Error(T().checkFailed))
+        document.head.append(script)
+      })
+    })
+  return {
+    /** Resolves to a fresh token, or null when the server does not ask for one. */
+    async token() {
+      await ready
+      if (!siteKey) return null
+      return new Promise((resolve, reject) => {
+        pending = { resolve, reject }
+        if (widget === null) {
+          widget = window.turnstile.render('#turnstile', {
+            sitekey: siteKey,
+            action: 'github-scan',
+            execution: 'execute',
+            appearance: 'interaction-only',
+            callback: token => settle(token),
+            'error-callback': () => settle(null),
+            'expired-callback': () => settle(null),
+          })
+        } else {
+          window.turnstile.reset(widget)
+        }
+        window.turnstile.execute('#turnstile')
+      })
+    },
+  }
+})()
+
 $('#github-form').addEventListener('submit', event => {
   event.preventDefault()
   const url = $('#github-url').value.trim()
   if (!url) return
   run(async () => {
-    const response = await fetch(`/api/github?url=${encodeURIComponent(url)}`)
+    const token = await turnstile.token()
+    const response = await fetch(`/api/github?url=${encodeURIComponent(url)}`, token ? { headers: { 'x-turnstile-token': token } } : {})
     if (!response.ok) {
       const body = await response.json().catch(() => ({}))
       throw new Error(body.error || T().serverError(response.status))

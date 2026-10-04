@@ -67,3 +67,66 @@ describe('cloudflare worker', () => {
     assert.equal((await worker.fetch(new Request('https://scan.test/api/github?url=a/b', { method: 'POST' }), env)).status, 405)
   })
 })
+
+describe('github proxy guard', () => {
+  const assets = { fetch: async () => new Response('asset') }
+  const request = () =>
+    new Request('https://scan.test/api/github?url=acme/mods', { headers: { 'cf-connecting-ip': '203.0.113.7', 'x-turnstile-token': 'tok' } })
+
+  /** Stubs global fetch: siteverify answers `verified`, codeload returns the zip. */
+  async function withFetch(verified: boolean, body: () => Promise<void>) {
+    const calls: { url: string; body?: string }[] = []
+    const original = globalThis.fetch
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input)
+      calls.push({ url, body: init?.body ? String(init.body) : undefined })
+      if (url.includes('siteverify')) return Response.json({ success: verified })
+      return new Response(zip)
+    }) as typeof fetch
+    try {
+      await body()
+    } finally {
+      globalThis.fetch = original
+    }
+    return calls
+  }
+
+  test('hands the site key to the browser only when configured', async () => {
+    const off = await worker.fetch(new Request('https://scan.test/api/config'), { ASSETS: assets })
+    assert.deepEqual(await off.json(), { turnstileSiteKey: null })
+    const on = await worker.fetch(new Request('https://scan.test/api/config'), { ASSETS: assets, TURNSTILE_SITE_KEY: 'site-key' })
+    assert.deepEqual(await on.json(), { turnstileSiteKey: 'site-key' })
+  })
+
+  test('refuses an address over the limit before contacting anyone', async () => {
+    const keys: string[] = []
+    const GITHUB_LIMITER = { limit: async ({ key }: { key: string }) => (keys.push(key), { success: false }) }
+    const calls = await withFetch(true, async () => {
+      const res = await worker.fetch(request(), { ASSETS: assets, GITHUB_LIMITER, TURNSTILE_SECRET_KEY: 'secret' })
+      assert.equal(res.status, 429)
+    })
+    assert.deepEqual(keys, ['203.0.113.7'])
+    assert.deepEqual(calls, [])
+  })
+
+  test('refuses a missing or rejected Turnstile token without downloading', async () => {
+    const calls = await withFetch(false, async () => {
+      const missing = new Request('https://scan.test/api/github?url=acme/mods')
+      assert.equal((await worker.fetch(missing, { ASSETS: assets, TURNSTILE_SECRET_KEY: 'secret' })).status, 403)
+      assert.equal((await worker.fetch(request(), { ASSETS: assets, TURNSTILE_SECRET_KEY: 'secret' })).status, 403)
+    })
+    assert.deepEqual(calls.map(c => new URL(c.url).hostname), ['challenges.cloudflare.com'])
+  })
+
+  test('downloads once the token checks out', async () => {
+    const calls = await withFetch(true, async () => {
+      const res = await worker.fetch(request(), { ASSETS: assets, TURNSTILE_SECRET_KEY: 'secret' })
+      assert.equal(res.status, 200)
+      assert.equal((await res.arrayBuffer()).byteLength, zip.byteLength)
+    })
+    const verify = new URLSearchParams(calls[0].body)
+    assert.equal(verify.get('response'), 'tok')
+    assert.equal(verify.get('remoteip'), '203.0.113.7')
+    assert.equal(new URL(calls[1].url).hostname, 'codeload.github.com')
+  })
+})

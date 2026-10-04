@@ -96,10 +96,12 @@ Workers. Users install nothing.
 1. **Input.** On `/scan`, paste a GitHub link: `owner/repo`, a repository URL,
    a `/tree/<ref>/<folder>` link to one plugin, or a marketplace repository
    (one report per plugin). Or drop a plugin `.zip` of at most 10 MB.
-2. **Fetch.** For GitHub, the browser calls `GET /api/github?url=…`. The Worker
-   downloads the archive from `codeload.github.com` (at most 40 MB) and returns
-   the zip. Browsers cannot download it directly because codeload sends no CORS
-   headers.
+2. **Fetch.** For GitHub, the browser runs a Cloudflare Turnstile check (usually
+   invisible) and calls `GET /api/github?url=…` with the token. The Worker
+   allows 10 calls per minute per IP, verifies the token, then downloads the
+   archive from `codeload.github.com` (at most 40 MB) and returns the zip.
+   Browsers cannot download it directly because codeload sends no CORS headers.
+   Uploads skip this step and are not limited.
 3. **Scan.** The browser loads `scan-worker.js` (first scan only, 3.6 MB, about
    1 MB gzipped) and scans in a Web Worker. Uploaded zips never leave the
    browser, and the Worker never parses plugin code.
@@ -137,8 +139,9 @@ What one scan uses (estimates from the code, not measured on live traffic):
   waiting on GitHub does not count as CPU time. Check the real figures in the
   Worker's observability tab (enabled in `wrangler.jsonc`).
 - **Unlike the free plan, Paid has no hard cap.** Traffic beyond the included
-  amounts is billed instead of refused, so abuse of `/api/github` turns into
-  cost. 10 million extra requests cost $3.
+  amounts is billed instead of refused, so abuse of `/api/github` would turn
+  into cost (10 million extra requests cost $3). The per-IP limit and Turnstile
+  check below keep that in check.
 
 ### Feasibility and limits
 
@@ -160,9 +163,11 @@ Known limits:
 - Public GitHub repositories only; archives up to 40 MB, uploads up to 10 MB.
 - The first scan downloads about 1 MB, and large repositories use the visitor's
   CPU, which is slower on phones.
-- `/api/github` is a public proxy. Abuse adds billed requests, and GitHub may
-  throttle the Worker (GitHub does not publish codeload limits). Add a WAF
-  rate-limiting rule on `/api/github` and watch usage in the dashboard.
+- `/api/github` is the only endpoint that costs anything, so it is the only one
+  guarded: 10 calls per minute per IP (Cloudflare counts this per location and
+  approximately) and a Turnstile token per call. GitHub may still throttle the
+  Worker (GitHub does not publish codeload limits); watch usage in the
+  dashboard.
 - No accounts, scan history or stored reports. The Paid plan's KV and D1
   quotas would hold stored reports at small scale without raising the bill, but
   none of this is built.
@@ -182,10 +187,29 @@ npx wrangler login        # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_I
 npm run deploy            # builds the browser scanner, then wrangler deploy
 ```
 
-To run locally on the Workers runtime: `npm run dev:cf`.
+**Turnstile.** In the Cloudflare dashboard, go to Turnstile → Add widget, add
+your Worker's hostname, and choose the Managed mode. Put the site key in
+`wrangler.jsonc` under `vars.TURNSTILE_SITE_KEY` (it is public) and store the
+secret:
 
-To add a custom domain: open the Worker → Settings → Domains & Routes. For
-abuse protection, add a WAF rate-limiting rule on `/api/github`.
+```bash
+npx wrangler secret put TURNSTILE_SECRET_KEY
+```
+
+Without the secret, the Worker skips the check; with the secret but no site
+key, every GitHub scan is refused. The per-IP limit is set under `ratelimits`
+in `wrangler.jsonc` and needs no setup.
+
+To run locally on the Workers runtime with Cloudflare's test keys, which always
+pass:
+
+```bash
+npm run dev:cf -- --var TURNSTILE_SITE_KEY:1x00000000000000000000AA \
+  --var TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA
+```
+
+To add a custom domain: open the Worker → Settings → Domains & Routes, then add
+the domain to the Turnstile widget's hostnames.
 
 ## Verdicts
 
@@ -275,7 +299,8 @@ Findings text comes from the scanner rules and is English only for now.
 - Paths containing `..` are dropped.
 - The GitHub fetcher only contacts `codeload.github.com` and follows no
   redirects (no SSRF).
-- Per-IP rate limit.
+- Per-IP rate limit; on the Worker, also a Turnstile token for each GitHub
+  download.
 - Strict CSP; the UI builds the DOM with `textContent` only.
 
 ## Layout

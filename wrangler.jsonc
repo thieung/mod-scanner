@@ -13,5 +13,10 @@
     "html_handling": "auto-trailing-slash",
     "not_found_handling": "none"
   },
+  // Per-IP limit on /api/github. Cloudflare counts per location and approximately.
+  "ratelimits": [{ "name": "GITHUB_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
+  // Turnstile on /api/github: put the widget's site key here (it is public) and
+  // the secret in `npx wrangler secret put TURNSTILE_SECRET_KEY`. No secret, no check.
+  "vars": { "TURNSTILE_SITE_KEY": "" },
   "observability": { "enabled": true }
 }
