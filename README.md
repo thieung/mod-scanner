@@ -88,8 +88,8 @@ npm run typecheck
 
 ## Web version
 
-The web portal (landing page on `/`, scanner on `/scan`) runs on Cloudflare
-Workers. Users install nothing.
+The web portal runs at <https://mod-scanner.vividkit.app> (landing page on `/`,
+scanner on `/scan`), on Cloudflare Workers. Users install nothing.
 
 ### Workflow
 
@@ -208,8 +208,10 @@ npm run dev:cf -- --var TURNSTILE_SITE_KEY:1x00000000000000000000AA \
   --var TURNSTILE_SECRET_KEY:1x0000000000000000000000000000000AA
 ```
 
-To add a custom domain: open the Worker → Settings → Domains & Routes, then add
-the domain to the Turnstile widget's hostnames.
+The hosted instance's domain is set under `routes` in `wrangler.jsonc`. To
+deploy your own copy, change or remove that entry (without it the Worker gets
+`mod-scanner.<your-subdomain>.workers.dev`), and add whichever hostname you use
+to the Turnstile widget.
 
 ## Verdicts
 

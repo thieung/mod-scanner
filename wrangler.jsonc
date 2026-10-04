@@ -3,6 +3,9 @@
   "name": "mod-scanner",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-01",
+  // Cloudflare creates the DNS record for this hostname on deploy; the
+  // vividkit.app zone must be on the same account.
+  "routes": [{ "pattern": "mod-scanner.vividkit.app", "custom_domain": true }],
   // Builds the in-browser scanner before every `wrangler dev` / `wrangler deploy`.
   "build": { "command": "npm run build:web" },
   "assets": {
@@ -17,6 +20,6 @@
   "ratelimits": [{ "name": "GITHUB_LIMITER", "namespace_id": "1001", "simple": { "limit": 10, "period": 60 } }],
   // Turnstile on /api/github: put the widget's site key here (it is public) and
   // the secret in `npx wrangler secret put TURNSTILE_SECRET_KEY`. No secret, no check.
-  "vars": { "TURNSTILE_SITE_KEY": "" },
+  "vars": { "TURNSTILE_SITE_KEY": "0x4AAAAAAFNp-3NKSTlcIyw4" },
   "observability": { "enabled": true }
 }
